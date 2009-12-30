@@ -1,0 +1,7 @@
+Changes
+Makefile.PL
+MANIFEST
+README
+t/Math-Vector-Real.t
+lib/Math/Vector/Real.pm
+META.yml                                 Module meta-data (added by MakeMaker)
