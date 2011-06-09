@@ -1,5 +1,9 @@
 Revision history for Perl extension Math::Vector::Real.
 
+0.03  Jun 9, 2011
+        - add methods axis_versor, versor, zero, is_zero and wrap
+	- some doc corrections and improvements
+
 0.02  Dec 31, 2009
         - clean up Makefile.PL
 	- remove 5.10 requirement
