@@ -1,5 +1,9 @@
 Revision history for Perl extension Math::Vector::Real.
 
+0.06  Jun 16, 2011
+        - import POSIX module
+        - add new_ref constructor
+
 0.04  Jun 14, 2011
 	- add cube constructor and min, max, dist, dist2 and abs2 methods
         - add canonical_base, normal_base, decompose
