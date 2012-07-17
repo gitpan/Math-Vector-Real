@@ -1,6 +1,6 @@
 package Math::Vector::Real;
 
-our $VERSION = '0.09';
+our $VERSION = '0.10';
 
 use strict;
 use warnings;
@@ -9,6 +9,9 @@ use POSIX ();
 
 use Exporter qw(import);
 our @EXPORT = qw(V);
+
+local ($@, $!, $SIG{__DIE__});
+eval { require Math::Vector::Real::XS };
 
 our %op = (add => '+',
 	   neg => 'neg',
@@ -87,6 +90,7 @@ sub _caller_op {
 }
 
 sub _check_dim {
+    local ($@, $SIG{__DIE__});
     eval { @{$_[0]} == @{$_[1]} } and return;
     my $op = _caller_op(1);
     my $loc = ($_[2] ? 'first' : 'second');
@@ -145,18 +149,10 @@ sub mul {
 }
 
 sub mul_me {
-    if (ref $_[1]) {
-	&_check_dim;
-	my ($v0, $v1) = @_;
-	my $acu = 0;
-	$acu += $v0->[$_] * $v1->[$_] for 0..$#$v0;
-	$acu;
-    }
-    else {
-	my ($v, $s) = @_;
-	$_ *= $s for @$v;
-	$v
-    }
+    ref $_[1] and croak "can not multiply by a vector in place as the result is not a vector";
+    my ($v, $s) = @_;
+    $_ *= $s for @$v;
+    $v
 }
 
 sub div {
@@ -215,11 +211,15 @@ sub abs {
     sqrt $acu;
 }
 
+*norm = \&abs;
+
 sub abs2 {
     my $acu = 0;
     $acu += $_ * $_ for @{$_[0]};
     $acu;
 }
+
+*norm2 = \&abs2;
 
 sub dist {
     &_check_dim;
@@ -241,6 +241,20 @@ sub dist2 {
 	$d2 += $d * $d;
     }
     $d2;
+}
+
+sub manhattan_norm {
+    my $n = 0;
+    $n += CORE::abs($_) for @{$_[0]};
+    return $n;
+}
+
+sub manhattan_dist {
+    &_check_dim;
+    my ($v0, $v1) = @_;
+    my $d = 0;
+    $d += CORE::abs($v0->[$_] - $v1->[$_]) for 0..$#$v0;
+    return $d;
 }
 
 sub _upgrade {
@@ -285,7 +299,7 @@ sub wrap {
 		  $c - $s * POSIX::floor($c/$s) } (0..$#$self)];
 }
 
-sub max {
+sub max_component {
     my $max = 0;
     for (@{shift()}) {
 	my $abs = CORE::abs($_);
@@ -294,7 +308,7 @@ sub max {
     $max
 }
 
-sub min {
+sub min_component {
     my $self = shift; 
     my $min = CORE::abs($self->[0]);
     for (@$self) {
@@ -304,12 +318,15 @@ sub min {
     $min
 }
 
+*max = \&max_component;
+*min = \&min_component;
+
 sub box {
     shift;
     return unless @_;
     my $min = clone(shift);
     my $max = clone($min);
-    my $dim = @$min - 1;
+    my $dim = $#$min;
     for (@_) {
         for my $ix (0..$dim) {
             my $c = $_->[$ix];
@@ -327,15 +344,31 @@ sub box {
 sub max_component_index {
     my $self = shift;
     return unless @$self;
-    my $max = $self->[0];
+    my $max = 0;
     my $max_ix = 0;
-    for my $ix (1..$#$self) {
-        if ($self->[$ix] > $max) {
+    for my $ix (0..$#$self) {
+        my $c = CORE::abs($self->[$ix]);
+        if ($c > $max) {
+            $max = $c;
             $max_ix = $ix;
-            $max = $self->[$ix];
         }
     }
     $max_ix;
+}
+
+sub min_component_index {
+    my $self = shift;
+    return unless @$self;
+    my $min = CORE::abs($self->[0]);
+    my $min_ix = 0;
+    for my $ix (1..$#$self) {
+        my $c = CORE::abs($self->[$ix]);
+        if ($c < $min) {
+            $min = $c;
+            $min_ix = $ix
+        }
+    }
+    $min_ix;
 }
 
 sub decompose {
@@ -423,7 +456,24 @@ sub complementary_base {
     wantarray ? @base[0..$last] : $base[0];
 }
 
+sub select_in_ball {
+    my $v = shift;
+    my $r = shift;
+    my $r2 = $r * $r;
+    grep $v->dist2($_) <= $r2, @_;
+}
 
+sub select_in_ball_ref2bitmap {
+    my $v = shift;
+    my $r = shift;
+    my $p = shift;
+    my $r2 = $r * $r;
+    my $bm = "\0" x int((@$p + 7) / 8);
+    for my $ix (0..$#$p) {
+        vec($bm, $ix, 1) = 1 if $v->dist2($p->[$ix]) <= $r2;
+    }
+    return $bm;
+}
 
 1;
 __END__
@@ -448,8 +498,8 @@ Math::Vector::Real - Real vector arithmetic in Perl
 
 A simple pure perl module to manipulate vectors of any dimension.
 
-The function C<V>, always exported by the module, allows to create new
-vectors:
+The function C<V>, always exported by the module, allows one to create
+new vectors:
 
   my $v = V(0, 1, 3, -1);
 
@@ -569,15 +619,15 @@ inside the grid containing it:
 
   such that ji*wi <= vi <  (ji+1)*wi
 
-=item $max = $v->max
+=item $max = $v->max_component
 
 Returns the maximum of the absolute values of the vector components.
 
-=item $min = $v->min
+=item $min = $v->min_component
 
 Returns the minimum of the absolute values of the vector components.
 
-=item $d2 = $b->abs2
+=item $d2 = $b->norm2
 
 Returns the norm of the vector squared.
 
@@ -645,26 +695,32 @@ angle C<$angle> in radians in anticlockwise direction.
 
 See L<http://en.wikipedia.org/wiki/Rotation_operator_(vector_space)>.
 
+=item @s = $center->select_in_ball($radius, $v1, $v2, $v3, ...)
+
+Selects from the list of given vectors those that lay inside the
+n-ball determined by the given radius and center (C<$radius> and
+C<$center> respectively).
+
 =back
 
 =head2 Zero vector handling
 
 Passing the zero vector to some methods (i.e. C<versor>, C<decompose>,
-C<normal_base>, etc.) is not acceptable, in those cases the module
-will croak with a "division by zero" error.
+C<normal_base>, etc.) is not acceptable. In those cases, the module
+will croak with an "Illegal division by zero" error.
 
 C<atan2> is an exceptional case that will return 0 when any of its
 arguments is the zero vector (for consistency with the C<atan2> builtin
 operating over real numbers).
 
-In any case note that, in practice, rounding errors almost always
-cause the check for the zero vector to fail resulting in numerical
+In any case note that, in practice, rounding errors frequently cause
+the check for the zero vector to fail resulting in numerical
 instabilities.
 
-The correct way to handle it is to introduce in your code checks of
-this kind:
+The correct way to handle this problem is to introduce in your code
+checks of this kind:
 
-  if ($v->abs2 < $epsilon2) {
+  if ($v->norm2 < $epsilon2) {
     croak "$v is too small";
   }
 
