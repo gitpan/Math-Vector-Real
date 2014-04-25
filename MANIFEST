@@ -3,7 +3,9 @@ Makefile.PL
 MANIFEST
 README
 t/Math-Vector-Real.t
-t/pods.t
+t/warnings.t
 lib/Math/Vector/Real.pm
 examples/dist_to_line.pl
-META.yml                                 Module meta-data (added by MakeMaker)
+examples/Math-Matrix.pl
+META.yml                                 Module YAML meta-data (added by MakeMaker)
+META.json                                Module JSON meta-data (added by MakeMaker)

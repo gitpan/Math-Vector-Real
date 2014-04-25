@@ -1,6 +1,6 @@
 package Math::Vector::Real;
 
-our $VERSION = '0.10';
+our $VERSION = '0.11';
 
 use strict;
 use warnings;
@@ -11,7 +11,10 @@ use Exporter qw(import);
 our @EXPORT = qw(V);
 
 local ($@, $!, $SIG{__DIE__});
-eval { require Math::Vector::Real::XS };
+
+our $dont_use_XS;
+
+eval { require Math::Vector::Real::XS } unless $dont_use_XS;
 
 our %op = (add => '+',
 	   neg => 'neg',
@@ -274,11 +277,18 @@ sub _upgrade {
 
 sub atan2 {
     my ($v0, $v1) = @_;
-    my $a0 = &abs($v0);
-    return 0 unless $a0;
-    my $u0 = $v0 / $a0;
-    my $p = $v1 * $u0;
-    CORE::atan2(&abs($v1 - $p * $u0), $p);
+    if (@$v0 == 2) {
+        my $dot = $v0->[0] * $v1->[0] + $v0->[1] * $v1->[1];
+        my $cross = $v0->[0] * $v1->[1] - $v0->[1] * $v1->[0];
+        return CORE::atan2($cross, $dot);
+    }
+    else {
+        my $a0 = &abs($v0);
+        return 0 unless $a0;
+        my $u0 = $v0 / $a0;
+        my $p = $v1 * $u0;
+        CORE::atan2(&abs($v1 - $p * $u0), $p);
+    }
 }
 
 sub versor {
@@ -321,6 +331,11 @@ sub min_component {
 *max = \&max_component;
 *min = \&min_component;
 
+sub first_orthant_reflection {
+    my $self = shift;
+    bless [map CORE::abs, @$self];
+}
+
 sub box {
     shift;
     return unless @_;
@@ -338,7 +353,54 @@ sub box {
             }
         }
     }
-    ($min, $max);
+    wantarray ? ($min, $max) : $max - $min;
+}
+
+sub nearest_in_box {
+    my $p = shift->clone;
+    my ($min, $max) = Math::Vector::Real->box(@_);
+    for (0..$#$p) {
+        if ($p->[$_] < $min->[$_]) {
+            $p->[$_] = $min->[$_];
+        }
+        elsif ($p->[$_] > $max->[$_]) {
+            $p->[$_] = $max->[$_];
+        }
+    }
+    $p
+}
+
+sub nearest_in_box_border {
+    my $p = shift->clone;
+    my ($b0, $b1) = Math::Vector::Real->box(@_);
+    my ($min_d, $comp, $comp_ix);
+    for my $q ($b0, $b1) {
+        for (0..$#$p) {
+            my $d = CORE::abs($p->[$_] - $q->[$_]);
+            if (!defined $min_d or $min_d > $d) {
+                $min_d = $d;
+                $comp = $q->[$_];
+                $comp_ix = $_;
+            }
+        }
+    }
+    $p->[$comp_ix] = $comp;
+    wantarray ? ($p, $min_d) : $p;
+}
+
+sub max_dist2_between_boxes {
+    my ($class, $a0, $a1, $b0, $b1) = @_;
+    my ($c0, $c1) = $class->box($a0, $a1);
+    my ($d0, $d1) = $class->box($b0, $b1);
+    my $d2 = 0;
+    for (0..$#$c0) {
+        my $e0 = $d1->[$_] - $c0->[$_];
+        my $e1 = $d0->[$_] - $c1->[$_];
+        $e0 *= $e0;
+        $e1 *= $e1;
+        $d2 += ($e0 > $e1 ? $e0 : $e1);
+    }
+    $d2;
 }
 
 sub max_component_index {
@@ -641,8 +703,33 @@ Returns the distance between the two vectors squared.
 
 =item ($bottom, $top) = Math::Vector::Real->box($v0, $v1, $v2, ...)
 
-Returns the two corners of a hyper-box containing all the given
-vectors.
+Returns the two corners of the L<axis-aligned minimum bounding
+box|http://en.wikipedia.org/wiki/Minimum_bounding_box#Axis-aligned_minimum_bounding_box>
+(or L<hyperrectangle|http://en.wikipedia.org/wiki/Hyperrectangle>) for
+the given vectors.
+
+In scalar context returns the difference between the two corners (the
+box diagonal vector).
+
+=item $p = $v->nearest_in_box($w0, $w1, ...)
+
+Returns the vector nearest to C<$v> from the axis-aligned minimum box
+bounding the given set of vectors.
+
+For instance, given a point C<$v> and an axis-aligned rectangle
+defined by two opposite corners (C<$c0> and C<$c1>), this method can be
+used to find the point nearest to C<$v> from inside the rectangle:
+
+  my $n = $v->nearest_in_box($c0, $c1);
+
+Note that if C<$v> lays inside the box, the nearest point is C<$v>
+itself. Otherwise it will be a point from the box hyper-surface.
+
+=item $d2 = Math::Vector::Real->max_dist2_between_boxes($a0, $a1, $b0, $b1)
+
+Returns the square of the maximum distance between any two points
+belonging respectively to the boxes defined by C<($a0, $a1)> and
+C<($b0, $b1)>.
 
 =item $v->set($u)
 
@@ -652,7 +739,17 @@ Note that this method is destructive.
 
 =item $d = $v->max_component_index
 
-Return the index of the vector component with the maximum size.
+Returns the index of the vector component with the maximum size.
+
+=item $r = $v->first_orthant_reflection
+
+Given the set of vectors formed by C<$v> and all its reflections
+around the axis-aligned hyperplanes, this method returns the one lying
+on the first orthant.
+
+See also
+[http://en.wikipedia.org/wiki/Reflection_%28mathematics%29|reflection]
+and [http://en.wikipedia.org/wiki/Orthant|orthant].
 
 =item ($p, $n) = $v->decompose($u)
 
@@ -672,7 +769,7 @@ wrong result may be generated.
 
 =item @b = $v->normal_base
 
-Returns a set of vectors forming an ortonormal base for the hyperplane
+Returns a set of vectors forming an orthonormal base for the hyperplane
 normal to $v.
 
 In scalar context returns just some unitary vector normal to $v.
@@ -727,6 +824,12 @@ checks of this kind:
 Or even better, reorder the operations to minimize the chance of
 instabilities if the algorithm allows it.
 
+=head2 Math::Vector::Real::XS
+
+The module L<Math::Vector::Real::XS> reimplements most of the methods
+available from this module in XS. When it is installed,
+C<Math::Vector::Real> when automatically load and use it.
+
 =head1 SEE ALSO
 
 L<Math::Vector::Real::Random> extends this module with random vector
@@ -738,9 +841,23 @@ There are other vector manipulation packages in CPAN (L<Math::Vec>,
 L<Math::VectorReal>, L<Math::Vector>), but they can only handle 3
 dimensional vectors.
 
+=head1 SUPPORT
+
+In order to report bugs you can send me and email to the address that
+appears below or use the CPAN RT bug-tracking system available at
+L<http://rt.cpan.org>.
+
+The source for the development version of the module is hosted at
+GitHub: L<https://github.com/salva/p5-Math-Vector-Real>.
+
+=head2 My wishlist
+
+If you like this module and you're feeling generous, take a look at my
+wishlist: L<http://amzn.com/w/1WU1P6IR5QZ42>
+
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2009-2012 by Salvador FandiE<ntilde>o
+Copyright (C) 2009-2012, 2014 by Salvador FandiE<ntilde>o
 (sfandino@yahoo.com)
 
 This library is free software; you can redistribute it and/or modify

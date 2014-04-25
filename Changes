@@ -1,5 +1,11 @@
 Revision history for Perl extension Math::Vector::Real.
 
+0.11  Apr 25, 2014
+        - add first_orthant_reflection method
+        - add max_dist2_between_boxes method
+        - add nearest_in_box method
+        - on tests, when comparing floats allow for a small error
+
 0.10  Jul 17, 2012
         - correct broken max_component_index method
         - add select_in_ball method
